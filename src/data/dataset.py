@@ -1,20 +1,21 @@
 import json
 from pathlib import Path
-
 import lightning as L
 import torch
 from torch.utils.data import DataLoader, Dataset, random_split
-from transformers import VideoMAEImageProcessor  # VideoMaeVideoProcessor > <
+from transformers import VideoMAEImageProcessor
+from pytorchvideo.data.encoded_video import EncodedVideo
+
+# from torchvision import transforms
 
 
 class VideoFolder(Dataset):
-    def __init__(self, videos_dir, labels_dir):
+    def __init__(self, videos_dir, labels_dir, stride=1, clip_duration=3):
         self.videos_dir = Path(videos_dir)
         self.labels_dir = Path(labels_dir)
         self.processor = VideoMAEImageProcessor.from_pretrained(
             "MCG-NJU/videomae-base-short-ssv2"
         )
-
         video_files = sorted(self.videos_dir.glob("*.mp4"))
 
         self.samples = []
@@ -22,21 +23,59 @@ class VideoFolder(Dataset):
             label_path = self.labels_dir / f"{video_path.stem}.json"
             if label_path.exists():
                 self.samples.append((video_path, label_path))
+        self.clip_duration = clip_duration
+        self.clips = []
+        self.stride = stride
+
+        self.prepare_clips()
 
     def __len__(self):
-        return len(self.samples)
+        return len(self.clips)
 
     def __getitem__(self, idx):
-        video_path, label_path = self.samples[idx]
+        clip_info = self.clips[idx]
 
-        # inputs = self.processor(str(video_path), return_tensors="pt")
-        # pixel_values = inputs["pixel_values"].squeeze(0)
+        encoded_video = EncodedVideo.from_path(clip_info["video_path"])
 
-        pass
-        # with open(label_path) as f:
-        #     label = json.load(f)["Dumping"]
+        video_data = encoded_video.get_clip(
+            start_sec=clip_info["start_time"], end_sec=clip_info["end_time"]
+        )
+        frames = video_data["video"]
+        inputs = self.processor(frames, return_tensors="pt")
 
-        # return pixel_values, torch.tensor(label, dtype=torch.long)
+        return inputs, torch.tensor(clip_info["label"], dtype=torch.long)
+
+    def prepare_clips(self):
+        for video_path, label_path in self.samples:
+            with open(label_path) as f:
+                annotation = json.load(f)
+                label = annotation["Dumping"]
+            if label == 1:
+                timestamp = annotation["DumpingDetails"]["Timestamp"]
+                # type_of_dumping = annotation["DumpingDetails"]["Type of Dumping"]
+
+            start_time = 0
+            encoded_video = EncodedVideo.from_path(video_path)
+            duration = encoded_video.duration
+            while start_time < duration:
+                end_time = start_time + self.clip_duration
+                if end_time > duration:
+                    end_time = duration
+
+                clip_label = 0
+                if label == 1:
+                    if start_time <= timestamp < end_time:
+                        clip_label = 1
+
+                self.clips.append(
+                    {
+                        "video_path": video_path,
+                        "label": clip_label,
+                        "start_time": start_time,
+                        "end_time": end_time,
+                    }
+                )
+                start_time += self.stride
 
 
 class IWDDDataModule(L.LightningDataModule):
@@ -44,8 +83,10 @@ class IWDDDataModule(L.LightningDataModule):
         self,
         videos_dir="data/raw/videos",
         annotations_dir="data/raw/labels",
-        batch_size=16,
+        batch_size=8,
         num_workers=4,
+        clip_duration=3,
+        stride=1,
         persistent_workers=True,
         train_split=0.7,
         val_split=0.15,
@@ -58,10 +99,14 @@ class IWDDDataModule(L.LightningDataModule):
         self.persistent_workers = persistent_workers
         self.train_split = train_split
         self.val_split = val_split
+        self.clip_duration = clip_duration
+        self.stride = stride
 
     def setup(self, stage: str):
 
-        full_dataset = VideoFolder(self.videos_dir, self.annotations_dir)
+        full_dataset = VideoFolder(
+            self.videos_dir, self.annotations_dir, self.stride, self.clip_duration
+        )
         total = len(full_dataset)
         train_size = int(total * self.train_split)
         val_size = int(total * self.val_split)
@@ -76,6 +121,9 @@ class IWDDDataModule(L.LightningDataModule):
         #     self.val_dataset = VideoFolder(self.videos_dir, self.annotations_dir)
         # else:
         #     self.test_dataset = VideoFolder(self.videos_dir, self.annotations_dir)
+
+        # self.train_transform = transforms.Compose([])
+        # self.val_transform = transforms.Compose([])
 
     def train_dataloader(self):
         return DataLoader(
