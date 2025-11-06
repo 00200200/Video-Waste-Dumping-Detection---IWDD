@@ -26,12 +26,12 @@ class VideoMAEModel(L.LightningModule):
         preds = logits.argmax(dim=1)
         acc = (preds == y).float().mean()
         f1 = f1_score(preds, y, task="multiclass", num_classes=2)
-        precision = precision(preds, y, task="multiclass", num_classes=2)
-        recall = recall(preds, y, task="multiclass", num_classes=2)
+        prec_score = precision(preds, y, task="multiclass", num_classes=2)
+        recall_score = recall(preds, y, task="multiclass", num_classes=2)
         self.log("train_accuracy", acc, prog_bar=True)
         self.log("train_f1", f1, prog_bar=True)
-        self.log("train_precision", precision, prog_bar=True)
-        self.log("train_recall", recall, prog_bar=True)
+        self.log("train_precision", prec_score, prog_bar=True)
+        self.log("train_recall", recall_score, prog_bar=True)
         return loss
 
     def validation_step(self, val_batch, batch_idx):
@@ -42,12 +42,12 @@ class VideoMAEModel(L.LightningModule):
         preds = logits.argmax(dim=1)
         acc = (preds == y).float().mean()
         f1 = f1_score(preds, y, task="multiclass", num_classes=2)
-        precision = precision(preds, y, task="multiclass", num_classes=2)
-        recall = recall(preds, y, task="multiclass", num_classes=2)
+        prec_score = precision(preds, y, task="multiclass", num_classes=2)
+        recall_score = recall(preds, y, task="multiclass", num_classes=2)
         self.log("val_accuracy", acc, prog_bar=True)
         self.log("val_f1", f1, prog_bar=True)
-        self.log("val_precision", precision, prog_bar=True)
-        self.log("val_recall", recall, prog_bar=True)
+        self.log("val_precision", prec_score, prog_bar=True)
+        self.log("val_recall", recall_score, prog_bar=True)
         return loss
 
     def predict_step(self, test_batch, batch_idx):
