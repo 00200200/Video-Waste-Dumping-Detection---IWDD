@@ -41,9 +41,14 @@ class VideoFolder(Dataset):
             start_sec=clip_info["start_time"], end_sec=clip_info["end_time"]
         )
         frames = video_data["video"]
-        inputs = self.processor(frames, return_tensors="pt")
 
-        return inputs, torch.tensor(clip_info["label"], dtype=torch.long)
+        permutated = frames.permute(1, 2, 3, 0)
+        frame_list = [frame for frame in permutated]
+
+        inputs = self.processor(frame_list, return_tensors="pt")
+        pixel_values = inputs["pixel_values"].squeeze(0) 
+
+        return pixel_values, torch.tensor(clip_info["label"], dtype=torch.long)
 
     def prepare_clips(self):
         for video_path, label_path in self.samples:
