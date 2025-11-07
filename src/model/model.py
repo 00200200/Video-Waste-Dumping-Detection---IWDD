@@ -15,7 +15,7 @@ class VideoMAEModel(L.LightningModule):
         self.learning_rate = learning_rate
         self.loss_fn = torch.nn.CrossEntropyLoss()
 
-        self.step_outputs = []
+        self.clip_outputs = []
 
     def forward(self, x):
         outputs = self.model(x)
@@ -49,10 +49,12 @@ class VideoMAEModel(L.LightningModule):
         self.clip_outputs.append(
             {
                 "preds": preds,
+                "targets": y,
                 "video_ids": val_batch["video_ids"],
                 "start_times": val_batch["start_times"],
                 "end_times": val_batch["end_times"],
-                "timestamps": val_batch["timestamps"],
+                "video_labels": val_batch["video_labels"],
+                "video_timestamps": val_batch["video_timestamps"],
             }
         )
         return loss
