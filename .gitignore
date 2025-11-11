@@ -219,6 +219,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 
-yolo* 
-datasets*
-runs    
+runs/
+datasets*/
+kaggle/
+yolo*
