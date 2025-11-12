@@ -102,6 +102,8 @@ class VideoFolder(Dataset):
                         "video_timestamp": timestamp,
                     }
                 )
+                if end_time >= duration:
+                    break
                 start_time += self.stride
 
 
@@ -130,7 +132,7 @@ class IWDDDataModule(L.LightningDataModule):
         self.clip_duration = clip_duration
         self.stride = stride
         self.num_frames = num_frames
-    
+
     def collate_fn(self, batch):
         pixel_values = [item["pixel_values"] for item in batch]
         labels = [item["label"] for item in batch]
