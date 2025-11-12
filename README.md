@@ -16,4 +16,22 @@
 
    # Install dependencies
    uv sync
+
+   clone dataset from Google Drive to data/raw
+   it should look like this:
+
+   iwdd/
+   └── data/
+       └── raw/
+            │──labels/
+            └──videos/
+
+
+   uv run -m src.scripts.train
+
+   tensorboard --logdir lightning_logs/  Open http://localhost:6006 in your browser to view metrics.
+
+
+
+
    ```
