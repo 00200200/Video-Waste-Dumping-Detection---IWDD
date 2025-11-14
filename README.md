@@ -41,7 +41,6 @@ uv run -m src.scripts.train
 **Available training parameters** (modify in `src/scripts/train.py`):
 
 ```python
-# Model parameters
 model = VideoMAEModel(
     learning_rate=1e-4  # Learning rate
 )
