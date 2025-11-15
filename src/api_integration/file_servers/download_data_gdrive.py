@@ -1,15 +1,18 @@
-import gdown
 import os
 import shutil
-from pathlib import Path
 import zipfile
-import dotenv
+from pathlib import Path
+
+import gdown
+
 
 def download_drive_folder(folder_id, output_dir):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     url = f"https://drive.google.com/drive/folders/{folder_id}"
-    gdown.download_folder(url=url, output=str(output_dir), quiet=False, use_cookies=False)
+    gdown.download_folder(
+        url=url, output=str(output_dir), quiet=False, use_cookies=False
+    )
     zip_files = list(output_dir.glob("*.zip"))
 
     if not zip_files:
@@ -39,8 +42,7 @@ def download_drive_folder(folder_id, output_dir):
     print(f"Final folder ready at: {extract_dir}\n")
     os.remove(zip_path)
 
-if __name__ == "__main__":
-    dotenv.load_dotenv()
 
-    download_drive_folder(os.getenv("1_PBc17FiZld-_nWaaW12wFP574MZdSSS"), "data/raw")
-    download_drive_folder(os.getenv("1tZY5qCtdPV0aJJgGxMqUm_HrERi4ad5r"), "data/raw")
+if __name__ == "__main__":
+    download_drive_folder("1_PBc17FiZld-_nWaaW12wFP574MZdSSS", "data/raw")
+    download_drive_folder("1tZY5qCtdPV0aJJgGxMqUm_HrERi4ad5r", "data/raw")
