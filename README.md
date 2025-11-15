@@ -21,9 +21,9 @@ uv sync
 ### 2. Prepare Dataset
 
 Download the dataset from Google Drive and using a script.
-
+```
 uv run python -m src.api_integration.file_servers.download_data_gdrive
-
+```
 ### 3. Training
 
 **Basic training with default parameters:**
