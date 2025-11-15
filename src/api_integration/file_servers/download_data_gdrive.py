@@ -41,6 +41,6 @@ def download_drive_folder(folder_id, output_dir):
 
 if __name__ == "__main__":
     dotenv.load_dotenv()
-    
-    download_drive_folder(os.getenv("V_FOLDER_DRIVE_ID"), "data/raw")
-    download_drive_folder(os.getenv("L_FOLDER_DRIVE_ID"), "data/raw")
+
+    download_drive_folder(os.getenv("1_PBc17FiZld-_nWaaW12wFP574MZdSSS"), "data/raw")
+    download_drive_folder(os.getenv("1tZY5qCtdPV0aJJgGxMqUm_HrERi4ad5r"), "data/raw")

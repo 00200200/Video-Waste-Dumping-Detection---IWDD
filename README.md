@@ -30,6 +30,9 @@ iwdd/
         └── videos/    # video files
 ```
 
+To use the script run:
+uv run python -m src.api_integration.file_servers.download_data_gdrive
+
 ### 3. Training
 
 **Basic training with default parameters:**
