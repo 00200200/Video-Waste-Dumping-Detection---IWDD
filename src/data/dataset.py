@@ -24,7 +24,9 @@ class VideoFolder(Dataset):
         stride=1,
         clip_duration=3,
         num_frames=16,
-        yolo_model_path=None, use_yolo=False
+        use_yolo=False,
+        yolo_model_path=None,
+        yolo_general_model_path=None,
     ):
         self.videos_dir = Path(videos_dir)
         self.labels_dir = Path(labels_dir)
@@ -37,6 +39,11 @@ class VideoFolder(Dataset):
             self.yolo_model = YOLO(yolo_model_path)
         else:
             self.yolo_model = None
+
+        if use_yolo and yolo_general_model_path:
+            self.yolo_general_model = YOLO(yolo_general_model_path)
+        else:
+            self.yolo_general_model = None
         
         video_files = sorted(self.videos_dir.glob("*.mp4"))
 
@@ -96,23 +103,44 @@ class VideoFolder(Dataset):
 
     def _apply_bounding_box(self, frames):
         batch_size, num_frames, height, width = frames.shape
-        
+
         frames_with_boxes = frames.clone()
-        
+        target_general_classes = {"person", "car", "truck"}
+
+        # tmp_dir = Path("./tmp")
+        # tmp_dir.mkdir(parents=True, exist_ok=True)
+
         for frame_idx in range(num_frames):
             frame = frames[:, frame_idx, :, :].permute(1, 2, 0).numpy().astype(np.uint8)
-            
-            #TODO@Maciej-Grzesik workout the confidence score
-            results = self.yolo_model(frame, conf=0.8)
-            annotated_frame = results[0].plot()
-            
-            annotated_frame_bgr = cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR)
-            cv2.imwrite(f"tmp/frame_debug_{frame_idx}.jpg", annotated_frame_bgr)
+            annotated_frame = frame.copy()
+
+            if self.yolo_model:
+                trash_result = self.yolo_model(frame, conf=0.3)[0]
+                annotated_frame = trash_result.plot(img=annotated_frame)
+
+            if self.yolo_general_model:
+                general_result = self.yolo_general_model(frame, conf=0.5)[0]
+                boxes = general_result.boxes
+                if boxes is not None and boxes.cls is not None:
+                    keep_mask = torch.tensor(
+                        [
+                            general_result.names[int(cls)].lower() in target_general_classes
+                            for cls in boxes.cls
+                        ],
+                        dtype=torch.bool,
+                        device=boxes.cls.device,
+                    )
+                    if keep_mask.any():
+                        filtered_result = general_result[keep_mask]
+                        annotated_frame = filtered_result.plot(img=annotated_frame)
+
+            # annotated_frame_bgr = cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR)
+            # cv2.imwrite(str(tmp_dir / f"frame_debug_{frame_idx}.jpg"), annotated_frame_bgr)
 
             frames_with_boxes[:, frame_idx, :, :] = torch.from_numpy(
                 annotated_frame.transpose(2, 0, 1)
             ).float() / 255.0
-        
+
         return frames_with_boxes
 
     def prepare_clips(self):
@@ -170,6 +198,7 @@ class IWDDDataModule(L.LightningDataModule):
         num_frames=16,
         val_split=0.15,
         yolo_model_path=None,
+        yolo_general_model_path=None,
         use_yolo=False,
     ):
         super().__init__()
@@ -184,8 +213,9 @@ class IWDDDataModule(L.LightningDataModule):
         self.clip_duration = clip_duration
         self.stride = stride
         self.num_frames = num_frames
-        self.yolo_model_path = yolo_model_path
         self.use_yolo = use_yolo
+        self.yolo_model_path = yolo_model_path
+        self.yolo_general_model_path = yolo_general_model_path
     
     def collate_fn(self, batch):
         pixel_values = [item["pixel_values"] for item in batch]
@@ -214,8 +244,9 @@ class IWDDDataModule(L.LightningDataModule):
             self.stride,
             self.clip_duration,
             self.num_frames,
-            self.yolo_model_path,
             self.use_yolo,
+            self.yolo_model_path,
+            self.yolo_general_model_path, 
         )
         total = len(full_dataset)
         train_size = int(total * self.train_split)
