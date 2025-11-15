@@ -103,10 +103,12 @@ class VideoFolder(Dataset):
             frame = frames[:, frame_idx, :, :].permute(1, 2, 0).numpy().astype(np.uint8)
             
             #TODO@Maciej-Grzesik workout the confidence score
-            results = self.yolo_model(frame, conf=0.5)
-            
+            results = self.yolo_model(frame, conf=0.8)
             annotated_frame = results[0].plot()
             
+            annotated_frame_bgr = cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR)
+            cv2.imwrite(f"tmp/frame_debug_{frame_idx}.jpg", annotated_frame_bgr)
+
             frames_with_boxes[:, frame_idx, :, :] = torch.from_numpy(
                 annotated_frame.transpose(2, 0, 1)
             ).float() / 255.0
