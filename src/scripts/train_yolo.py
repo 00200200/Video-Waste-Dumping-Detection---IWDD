@@ -18,6 +18,10 @@ def train():
 
     model.train(
         data=str(DATASETS_DIR / "combined_all" / "data.yaml"),
+        single_cls=True,
+        cache="disk",
+        close_mosaic=25,
+        cos_lr=True,
         patience=30,
         epochs=500,
         imgsz=640,
@@ -36,7 +40,7 @@ def train():
         box=7.5,
         cls=1.2,
         dfl=1.5,
-        label_smoothing=0.0,
+        label_smoothing=0.05,
         hsv_h=0.015,
         hsv_s=0.6,
         hsv_v=0.4,
@@ -62,11 +66,11 @@ def tune():
     console.print("\n[bold cyan]Starting YOLO hyperparameter tuning[/bold cyan]")
     console.print(f"[dim]Dataset: {DATASETS_DIR / 'combined_all' / 'data.yaml'}[/dim]\n")
     
-    model = YOLO('yolov8n.pt')
+    model = YOLO('yolov8m.pt')
     model.tune(
         data=str(DATASETS_DIR / "combined_all" / "data.yaml"),
         epochs=50,       
-        batch=4,          
+        batch=-1,          
         device='0',
         project=str(PROJECT_ROOT / "runs"),
         name="yolov8n_trash_detector_tune",
