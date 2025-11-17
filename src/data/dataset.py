@@ -6,7 +6,6 @@ import torch
 from pytorchvideo.data.encoded_video import EncodedVideo
 from torch.utils.data import DataLoader, Dataset, random_split
 from transformers import AutoProcessor
-from transformers import VideoMAEImageProcessor
 
 from ultralytics import YOLO
 import cv2
