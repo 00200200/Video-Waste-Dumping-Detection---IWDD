@@ -11,7 +11,6 @@ from ultralytics import YOLO
 import cv2
 import numpy as np
 
-# from torchvision import transforms
 
 
 class VideoFolder(Dataset):
