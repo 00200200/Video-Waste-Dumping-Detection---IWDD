@@ -2,14 +2,13 @@ import json
 from pathlib import Path
 
 import lightning as L
+import numpy as np
 import torch
 from pytorchvideo.data.encoded_video import EncodedVideo
-from torch.utils.data import DataLoader, Dataset, random_split
+from torch.utils.data import DataLoader, Dataset, Subset, random_split
+from torchvision import transforms
 from transformers import AutoProcessor
-
 from ultralytics import YOLO
-import numpy as np
-
 
 
 class VideoFolder(Dataset):
@@ -24,8 +23,9 @@ class VideoFolder(Dataset):
         use_yolo=False,
         yolo_model_path=None,
         yolo_general_model_path=None,
-        yolo_trash_conf=0.3,
+        yolo_trash_conf=0.2,
         yolo_general_conf=0.5,
+        use_augmentation=False,
     ):
         self.videos_dir = Path(videos_dir)
         self.labels_dir = Path(labels_dir)
@@ -35,7 +35,8 @@ class VideoFolder(Dataset):
         self.use_yolo = use_yolo
         self.yolo_trash_conf = yolo_trash_conf
         self.yolo_general_conf = yolo_general_conf
-        
+        self.use_augmentation = use_augmentation
+
         if use_yolo and yolo_model_path:
             self.yolo_model = YOLO(yolo_model_path)
         else:
@@ -45,7 +46,19 @@ class VideoFolder(Dataset):
             self.yolo_general_model = YOLO(yolo_general_model_path)
         else:
             self.yolo_general_model = None
-        
+
+        if self.use_augmentation:
+            self.augmentation = transforms.Compose(
+                [
+                    transforms.RandomHorizontalFlip(p=0.5),
+                    transforms.RandomRotation(degrees=10),
+                    transforms.ColorJitter(brightness=0.5, hue=0.3),
+                    transforms.GaussianBlur(kernel_size=(5, 9), sigma=(0.1, 5.0)),
+                ]
+            )
+        else:
+            self.augmentation = None
+
         video_files = sorted(self.videos_dir.glob("*.mp4"))
 
         self.samples = []
@@ -63,6 +76,9 @@ class VideoFolder(Dataset):
 
         model_name = self.model_config["model_name"]
         processor = AutoProcessor.from_pretrained(model_name)
+        image_processor = getattr(processor, "image_processor", processor)
+        if hasattr(image_processor, "do_rescale"):
+            image_processor.do_rescale = False
         return processor
 
     def __len__(self):
@@ -77,6 +93,7 @@ class VideoFolder(Dataset):
             start_sec=clip_info["start_time"], end_sec=clip_info["end_time"]
         )
         frames = video_data["video"]
+        frames = frames / 255.0
 
         total_frames = frames.shape[1]
 
@@ -86,7 +103,11 @@ class VideoFolder(Dataset):
         if self.use_yolo and self.yolo_model:
             frames = self._apply_bounding_box(frames)
 
+        if self.augmentation:
+            frames = self.apply_augmentation(frames)
+
         permutated = frames.permute(1, 0, 2, 3)
+
         frame_list = [frame for frame in permutated]
 
         inputs = self.processor(frame_list, return_tensors="pt")
@@ -102,45 +123,60 @@ class VideoFolder(Dataset):
             "video_timestamp": clip_info["video_timestamp"],
         }
 
-    def _apply_bounding_box(self, frames):
+    def apply_augmentation(self, frames):
         batch_size, num_frames, height, width = frames.shape
 
-        frames_with_boxes = frames.clone()
-        target_general_classes = {"person", "car", "truck"}
-
-        # tmp_dir = Path("./tmp")
-        # tmp_dir.mkdir(parents=True, exist_ok=True)
+        augmented_frames = frames.clone()
 
         for frame_idx in range(num_frames):
-            frame = frames[:, frame_idx, :, :].permute(1, 2, 0).numpy().astype(np.uint8)
+            frame = frames[:, frame_idx, :, :]
+            frame = self.augmentation(frame)
+            frame = torch.clamp(frame, 0.0, 1.0)
+            augmented_frames[:, frame_idx, :, :] = frame
+
+        return augmented_frames
+
+    def _apply_bounding_box(self, frames):
+        _, num_frames, _, _ = frames.shape
+
+        frames_with_boxes = frames.clone()
+
+        # self.yolo_general_model: person=0, car=2, truck=7
+        general_class_ids = [0, 2, 7]
+
+        for frame_idx in range(num_frames):
+            frame = (
+                (frames[:, frame_idx, :, :] * 255.0)
+                .permute(1, 2, 0)
+                .numpy()
+                .astype(np.uint8)
+            )
+
             annotated_frame = frame.copy()
 
             if self.yolo_model:
-                trash_result = self.yolo_model(frame, conf=self.yolo_trash_conf)[0]
-                annotated_frame = trash_result.plot(img=annotated_frame)
+                trash_result = self.yolo_model(
+                    frame,
+                    conf=self.yolo_trash_conf,
+                    iou=0.3
+                )[0]
+                annotated_frame = trash_result.plot(img=annotated_frame, labels=False)
 
             if self.yolo_general_model:
-                general_result = self.yolo_general_model(frame, conf=self.yolo_general_conf)[0]
-                boxes = general_result.boxes
-                if boxes is not None and boxes.cls is not None:
-                    keep_mask = torch.tensor(
-                        [
-                            general_result.names[int(cls)].lower() in target_general_classes
-                            for cls in boxes.cls
-                        ],
-                        dtype=torch.bool,
-                        device=boxes.cls.device,
-                    )
-                    if keep_mask.any():
-                        filtered_result = general_result[keep_mask]
-                        annotated_frame = filtered_result.plot(img=annotated_frame)
+                general_result = self.yolo_general_model(
+                    frame,
+                    conf=self.yolo_general_conf,
+                    classes=general_class_ids
+                )[0]
+                general_result.boxes = general_result.boxes[
+                    [int(c.item()) in general_class_ids for c in general_result.boxes.cls]
+                ]
 
-            # annotated_frame_bgr = cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR)
-            # cv2.imwrite(str(tmp_dir / f"frame_debug_{frame_idx}.jpg"), annotated_frame_bgr)
+                annotated_frame = general_result.plot(img=annotated_frame, labels=False)
 
-            frames_with_boxes[:, frame_idx, :, :] = torch.from_numpy(
-                annotated_frame.transpose(2, 0, 1)
-            ).float() / 255.0
+            frames_with_boxes[:, frame_idx, :, :] = (
+                torch.from_numpy(annotated_frame.transpose(2, 0, 1)).float() / 255.0
+            )
 
         return frames_with_boxes
 
@@ -203,6 +239,7 @@ class IWDDDataModule(L.LightningDataModule):
         use_yolo=False,
         yolo_trash_conf=0.3,
         yolo_general_conf=0.5,
+        use_augmentation=False,
     ):
         super().__init__()
         self.model_config = model_config
@@ -221,7 +258,8 @@ class IWDDDataModule(L.LightningDataModule):
         self.yolo_general_model_path = yolo_general_model_path
         self.yolo_trash_conf = yolo_trash_conf
         self.yolo_general_conf = yolo_general_conf
-    
+        self.use_augmentation = use_augmentation
+
     def collate_fn(self, batch):
         pixel_values = [item["pixel_values"] for item in batch]
         labels = [item["label"] for item in batch]
@@ -242,7 +280,7 @@ class IWDDDataModule(L.LightningDataModule):
 
     def setup(self, stage: str):
 
-        full_dataset = VideoFolder(
+        temp_dataset = VideoFolder(
             self.videos_dir,
             self.annotations_dir,
             self.model_config,
@@ -254,24 +292,48 @@ class IWDDDataModule(L.LightningDataModule):
             self.yolo_general_model_path,
             self.yolo_trash_conf,
             self.yolo_general_conf,
+            use_augmentation=False,
         )
-        total = len(full_dataset)
+        total = len(temp_dataset)
         train_size = int(total * self.train_split)
         val_size = int(total * self.val_split)
         test_size = total - train_size - val_size
-        self.train_dataset, self.val_dataset, self.test_dataset = random_split(
-            full_dataset,
+        train_subset, val_subset, test_subset = random_split(
+            temp_dataset,
             [train_size, val_size, test_size],
             generator=torch.Generator().manual_seed(42),
         )
-        # if stage == "fit":
-        #     self.train_dataset = VideoFolder(self.videos_dir, self.annotations_dir)
-        #     self.val_dataset = VideoFolder(self.videos_dir, self.annotations_dir)
-        # else:
-        #     self.test_dataset = VideoFolder(self.videos_dir, self.annotations_dir)
-
-        # self.train_transform = transforms.Compose([])
-        # self.val_transform = transforms.Compose([])
+        self.train_dataset_full = VideoFolder(
+            self.videos_dir,
+            self.annotations_dir,
+            self.model_config,
+            self.stride,
+            self.clip_duration,
+            self.num_frames,
+            self.use_yolo,
+            self.yolo_model_path,
+            self.yolo_general_model_path,
+            self.yolo_trash_conf,
+            self.yolo_general_conf,
+            use_augmentation=self.use_augmentation,
+        )
+        self.val_dataset_full = VideoFolder(
+            self.videos_dir,
+            self.annotations_dir,
+            self.model_config,
+            self.stride,
+            self.clip_duration,
+            self.num_frames,
+            self.use_yolo,
+            self.yolo_model_path,
+            self.yolo_general_model_path,
+            self.yolo_trash_conf,
+            self.yolo_general_conf,
+            use_augmentation=False,
+        )
+        self.train_dataset = Subset(self.train_dataset_full, train_subset.indices)
+        self.val_dataset = Subset(self.val_dataset_full, val_subset.indices)
+        self.test_dataset = Subset(self.val_dataset_full, test_subset.indices)
 
     def train_dataloader(self):
         return DataLoader(
