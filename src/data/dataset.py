@@ -23,7 +23,7 @@ class VideoFolder(Dataset):
         use_yolo=False,
         yolo_model_path=None,
         yolo_general_model_path=None,
-        yolo_trash_conf=0.3,
+        yolo_trash_conf=0.2,
         yolo_general_conf=0.5,
         use_augmentation=False,
     ):
@@ -137,10 +137,12 @@ class VideoFolder(Dataset):
         return augmented_frames
 
     def _apply_bounding_box(self, frames):
-        batch_size, num_frames, height, width = frames.shape
+        _, num_frames, _, _ = frames.shape
 
         frames_with_boxes = frames.clone()
-        target_general_classes = {"person", "car", "truck"}
+
+        # self.yolo_general_model: person=0, car=2, truck=7
+        general_class_ids = [0, 2, 7]
 
         for frame_idx in range(num_frames):
             frame = (
@@ -153,29 +155,24 @@ class VideoFolder(Dataset):
             annotated_frame = frame.copy()
 
             if self.yolo_model:
-                trash_result = self.yolo_model(frame, conf=self.yolo_trash_conf)[0]
+                trash_result = self.yolo_model(
+                    frame,
+                    conf=self.yolo_trash_conf,
+                    iou=0.3
+                )[0]
                 annotated_frame = trash_result.plot(img=annotated_frame, labels=False)
 
             if self.yolo_general_model:
                 general_result = self.yolo_general_model(
-                    frame, conf=self.yolo_general_conf
+                    frame,
+                    conf=self.yolo_general_conf,
+                    classes=general_class_ids
                 )[0]
-                boxes = general_result.boxes
-                if boxes is not None and boxes.cls is not None:
-                    keep_mask = torch.tensor(
-                        [
-                            general_result.names[int(cls)].lower()
-                            in target_general_classes
-                            for cls in boxes.cls
-                        ],
-                        dtype=torch.bool,
-                        device=boxes.cls.device,
-                    )
-                    if keep_mask.any():
-                        filtered_result = general_result[keep_mask]
-                        annotated_frame = filtered_result.plot(
-                            img=annotated_frame, labels=False
-                        )
+                general_result.boxes = general_result.boxes[
+                    [int(c.item()) in general_class_ids for c in general_result.boxes.cls]
+                ]
+
+                annotated_frame = general_result.plot(img=annotated_frame, labels=False)
 
             frames_with_boxes[:, frame_idx, :, :] = (
                 torch.from_numpy(annotated_frame.transpose(2, 0, 1)).float() / 255.0
