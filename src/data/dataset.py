@@ -7,7 +7,6 @@ from pytorchvideo.data.encoded_video import EncodedVideo
 from torch.utils.data import DataLoader, Dataset, random_split
 from transformers import AutoProcessor
 
-
 class VideoFolder(Dataset):
     def __init__(
         self,
@@ -21,6 +20,8 @@ class VideoFolder(Dataset):
         self.videos_dir = Path(videos_dir)
         self.labels_dir = Path(labels_dir)
         self.model_config = model_config
+        self.use_text = self.model_config["use_text"]
+        self.text_prompts = self.model_config["text_prompts"] if self.use_text else None
         self.processor = self.load_processor()
         video_files = sorted(self.videos_dir.glob("*.mp4"))
 
@@ -33,7 +34,6 @@ class VideoFolder(Dataset):
         self.clips = []
         self.stride = stride
         self.num_frames = num_frames
-        self.use_text = self.model_config["use_text"]
         self.prepare_clips()
 
     def load_processor(self):
@@ -48,25 +48,29 @@ class VideoFolder(Dataset):
         clip_info = self.clips[idx]
 
         encoded_video = EncodedVideo.from_path(clip_info["video_path"])
-
         video_data = encoded_video.get_clip(
-            start_sec=clip_info["start_time"], end_sec=clip_info["end_time"]
+          start_sec=clip_info["start_time"], 
+          end_sec=clip_info["end_time"]
         )
         frames = video_data["video"]
 
         total_frames = frames.shape[1]
-
         indices = torch.linspace(0, total_frames - 1, self.num_frames).long()
         frames = frames[:, indices, :, :]
-
         permutated = frames.permute(1, 0, 2, 3)
-        frame_list = [frame for frame in permutated]
 
         if self.use_text == 1:
-            text_input = f"dumping at {clip_info["video_timestamp"]}" if clip_info["label"] == 1 else "no dumping"
+            # 2 prompts -> two classes
+            inputs = self.processor(
+                text=self.text_prompts, 
+                images=list(permutated),
+                return_tensors="pt",
+                padding=True
+                )
+        else:
+            frame_list = [frame for frame in permutated]
+            inputs = self.processor(images=frame_list, return_tensors="pt")
         
-        inputs = self.processor(images=frame_list, return_tensors="pt") if self.use_text == 0 else self.processor(images=frame_list, text=text_input, return_tensors="pt") 
-                
         pixel_values = inputs["pixel_values"].squeeze(0)
 
         input_ids = inputs.get("input_ids")
@@ -159,6 +163,25 @@ class IWDDDataModule(L.LightningDataModule):
 
     def collate_fn(self, batch):
         pixel_values = [item["pixel_values"] for item in batch]
+        labels = [item["label"] for item in batch]
+        video_ids = [item["video_id"] for item in batch]
+        start_times = [item["start_time"] for item in batch]
+        end_times = [item["end_time"] for item in batch]
+        video_labels = [item["video_label"] for item in batch]
+        video_timestamps = [item["video_timestamp"] for item in batch]
+
+        return {
+            "pixel_values": torch.stack(pixel_values),
+            "labels": torch.stack(labels),
+            "video_ids": video_ids,
+            "start_times": start_times,
+            "end_times": end_times,
+            "video_labels": video_labels,
+            "video_timestamps": video_timestamps,
+        }
+    
+    def collate_fn_wtext(self, batch):
+        pixel_values = [item["pixel_values"] for item in batch]
         input_ids = [item.get("input_ids") for item in batch]
         attention_mask = [item.get("attention_mask") for item in batch]
         labels = [item["label"] for item in batch]
@@ -214,7 +237,7 @@ class IWDDDataModule(L.LightningDataModule):
             shuffle=True,
             num_workers=self.num_workers,
             persistent_workers=self.persistent_workers,
-            collate_fn=self.collate_fn,
+            collate_fn=self.collate_fn_wtext if self.model_config["use_text"] == 1 else self.collate_fn,
         )
 
     def val_dataloader(self):
@@ -224,7 +247,7 @@ class IWDDDataModule(L.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             persistent_workers=self.persistent_workers,
-            collate_fn=self.collate_fn,
+            collate_fn=self.collate_fn_wtext if self.model_config["use_text"] == 1 else self.collate_fn,
         )
 
     def test_dataloader(self):
@@ -234,5 +257,5 @@ class IWDDDataModule(L.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             persistent_workers=self.persistent_workers,
-            collate_fn=self.collate_fn,
+            collate_fn=self.collate_fn_wtext if self.model_config["use_text"] == 1 else self.collate_fn,
         )
