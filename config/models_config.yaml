@@ -12,4 +12,4 @@ models:
   xclip:
     model_name: 'microsoft/xclip-base-patch32-16-frames'
     use_text: 1
-    text_prompts: []
+    text_prompts: ["no dumping", "illegal dumping"]
