@@ -114,6 +114,33 @@ class VideoClassificationModel(L.LightningModule):
         )
         return loss
 
+    def test_step(self, test_batch, batch_idx):
+        x, y = test_batch, test_batch["labels"]
+        logits = self(x)
+        loss = self.loss_fn(logits, y)
+        self.log("test_loss", loss, prog_bar=True, batch_size=x["pixel_values"].size(0))
+        preds = logits.argmax(dim=1)
+        acc = (preds == y).float().mean()
+        f1 = f1_score(preds, y, task="multiclass", num_classes=2)
+        prec_score = precision(preds, y, task="multiclass", num_classes=2)
+        recall_score = recall(preds, y, task="multiclass", num_classes=2)
+        self.log("test_accuracy", acc, prog_bar=True, batch_size=x["pixel_values"].size(0))
+        self.log("test_f1", f1, prog_bar=True, batch_size=x["pixel_values"].size(0))
+        self.log("test_precision", prec_score, prog_bar=True, batch_size=x["pixel_values"].size(0))
+        self.log("test_recall", recall_score, prog_bar=True, batch_size=x["pixel_values"].size(0))
+        self.clip_outputs.append(
+            {
+                "preds": preds,
+                "targets": y,
+                "video_ids": test_batch["video_ids"],
+                "start_times": test_batch["start_times"],
+                "end_times": test_batch["end_times"],
+                "video_labels": test_batch["video_labels"],
+                "video_timestamps": test_batch["video_timestamps"],
+            }
+        )
+        return loss
+
     def predict_step(self, test_batch, batch_idx):
         x, y = test_batch, test_batch["labels"]
         logits = self(x)
@@ -128,4 +155,11 @@ class VideoClassificationModel(L.LightningModule):
         self.log("val_video_precision", metrics["precision"], prog_bar=True)
         self.log("val_video_recall", metrics["recall"], prog_bar=True)
         self.log("val_video_f1", metrics["f1"], prog_bar=True)
+        self.clip_outputs = []
+
+    def on_test_epoch_end(self):
+        metrics = calculate_metrics(self.clip_outputs)
+        self.log("test_video_precision", metrics["precision"], prog_bar=True)
+        self.log("test_video_recall", metrics["recall"], prog_bar=True)
+        self.log("test_video_f1", metrics["f1"], prog_bar=True)
         self.clip_outputs = []

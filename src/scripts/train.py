@@ -3,7 +3,7 @@ from pathlib import Path
 
 import lightning as L
 from lightning.pytorch.callbacks import ModelCheckpoint
-
+from lightning.pytorch.loggers import CSVLogger
 from src.data.dataset import IWDDDataModule
 from src.model.model import VideoClassificationModel
 from src.utils.utils import get_model_config
@@ -15,7 +15,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="videomae_ssv2")
     parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--unfreeze-layers", type=int, default=1)
     parser.add_argument("--accelerator", type=str, default="auto")
@@ -23,6 +23,8 @@ def main():
     parser.add_argument("--stride", type=int, default=1)
     parser.add_argument("--yolo-conf", type=float, default=0.3)
     parser.add_argument("--yolo-general-conf", type=float, default=0.5)
+    parser.add_argument("--checkpoint", type=str, default=None, help="ścieżka do checkpointa do wznowienia treningu")
+    parser.add_argument("--test-only", action="store_true", help="pomiń trening i tylko przetestuj checkpoint")
     args = parser.parse_args()
 
     model_config = get_model_config(args.model)
@@ -40,10 +42,10 @@ def main():
     data = IWDDDataModule(
         model_config=model_config,
         batch_size=args.batch_size,
-        num_workers=1,
+        num_workers=0,
         clip_duration=args.clip_duration,
         stride=args.stride,
-        persistent_workers=True,
+        persistent_workers=False,
         train_split=0.1,
         num_frames=16,
         val_split=0.15,
@@ -56,12 +58,20 @@ def main():
 
     trainer = L.Trainer(
         max_epochs=args.epochs,
+        #TUTAJ MOZESZ USTAWIC ILE TESTSETU MA BYC UZYTE
+        limit_test_batches=0.1,
         accelerator=args.accelerator,
         log_every_n_steps=1,
         deterministic=True,
         callbacks=[checkpoint_callback],
+        #TO POWINNO ZAPISAC DO FOLDERU
+        logger=CSVLogger("logs", name="test_results"),
     )
-    trainer.fit(model, data)
+    ckpt_path = args.checkpoint if args.checkpoint else None
+    if not args.test_only:
+        trainer.fit(model, data, ckpt_path=ckpt_path)
+    else:
+        trainer.test(model, data, ckpt_path=ckpt_path)
 
 
 if __name__ == "__main__":
